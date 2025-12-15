@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -18,11 +17,10 @@
     h1 {
       font-size: 1.15rem;
       margin-bottom: 10px;
-      color: #222;
     }
 
     .card {
-      background: #ffffff;
+      background: #fff;
       border-radius: 12px;
       padding: 14px;
       margin-bottom: 14px;
@@ -57,7 +55,8 @@
     }
 
     button:disabled {
-      opacity: 0.5;
+      opacity: 0.45;
+      cursor: default;
     }
 
     .output {
@@ -67,16 +66,13 @@
       background: #fafafa;
       border: 1px solid #ddd;
       font-family: monospace;
-      font-size: 0.9rem;
       white-space: pre-wrap;
       word-break: break-all;
     }
 
-    /* 生テキストは少し大きめ＆高さも確保 */
-    #rawOut {
-      font-size: 1.0rem;
-      min-height: 4em;
-    }
+    /* 文字サイズ切替 */
+    .text-normal { font-size: 0.95rem; }
+    .text-large  { font-size: 1.15rem; }
 
     .status {
       font-size: 0.82rem;
@@ -122,7 +118,6 @@
       background: #e7f0ff;
       color: #1a73e8;
       margin-right: 6px;
-      margin-bottom: 4px;
     }
 
     .hint {
@@ -137,7 +132,7 @@
 
 <h1>老眼OCRルーペ</h1>
 <p style="font-size:0.8rem; color:#777; margin:4px 0 10px;">
-  カメラで印字に狙いを合わせて、「読み取り」を押した瞬間だけOCRします。数字だけ音声で読み上げます。
+  かざして「読み取り」を押した瞬間だけOCRします。読み上げは基本OFF。
 </p>
 
 <div class="card">
@@ -149,7 +144,8 @@
     <button id="startBtn">カメラ開始</button>
     <button id="stopBtn" class="secondary" disabled>停止</button>
     <button id="shotBtn" class="secondary">読み取り</button>
-    <button id="ttsToggle" class="secondary">読み上げ ON</button>
+    <button id="ttsToggle" class="secondary">読み上げ OFF</button>
+    <button id="sizeToggle" class="secondary">文字 大</button>
   </div>
 
   <div class="status" id="statusText">カメラ停止中</div>
@@ -157,36 +153,24 @@
 
 <div class="card">
   <h2 style="font-size:1rem; margin-top:0;">読み取り結果</h2>
-
-  <div class="label" style="font-size:0.8rem; color:#555;">生テキスト（OCR結果）</div>
-  <div id="rawOut" class="output">-</div>
-
-  <div class="label" style="font-size:0.8rem; color:#555; margin-top:10px;">検出された数字列（読み上げ対象）</div>
-  <div id="numbersOut" class="output">なし</div>
+  <div id="rawOut" class="output text-normal">-</div>
 </div>
 
 <div class="card">
-  <h2 style="font-size:1rem; margin-top:0;">履歴（サムネ＋全文）</h2>
+  <h2 style="font-size:1rem; margin-top:0;">履歴</h2>
   <button id="clearHist" class="secondary" style="padding:4px 10px; font-size:0.75rem;">全削除</button>
-  <div class="hint">※履歴をタップすると、サムネとOCR全文を再確認できます。</div>
-
+  <div class="hint">※タップで全文を再確認できます</div>
   <ul id="history" class="history"></ul>
 </div>
 
-<!-- 履歴詳細（再確認） -->
-<dialog id="histDialog" style="width:min(820px, 96vw); border:none; border-radius:12px; padding:0;">
-  <div style="padding:12px; display:flex; justify-content:space-between; gap:8px; align-items:center; border-bottom:1px solid #ddd;">
-    <div>
-      <div id="dlgTime" style="font-weight:700;"></div>
-      <div id="dlgNums" style="font-size:12px; opacity:.75;"></div>
-    </div>
-    <button id="dlgClose" class="secondary" type="button" style="margin:0;">閉じる</button>
+<dialog id="histDialog" style="width:min(820px,96vw);border:none;border-radius:12px;padding:0;">
+  <div style="padding:12px;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;">
+    <div id="dlgTime" style="font-weight:700;"></div>
+    <button id="dlgClose" class="secondary">閉じる</button>
   </div>
-
-  <div style="padding:12px; display:grid; gap:10px;">
-    <img id="dlgImg" alt="" style="width:100%; height:auto; border-radius:12px; border:1px solid #eee; background:#eee;" />
-    <div style="font-size:0.8rem; color:#555;">生テキスト（全文）</div>
-    <div id="dlgRaw" class="output" style="min-height:10em;"></div>
+  <div style="padding:12px;display:grid;gap:10px;">
+    <img id="dlgImg" style="width:100%;border-radius:12px;border:1px solid #eee;" />
+    <div id="dlgRaw" class="output text-normal"></div>
   </div>
 </dialog>
 
@@ -194,400 +178,182 @@
 
 <script>
   const API_KEY = "K88740512688957";
-  const HISTORY_KEY = "lotOcrHistory_v2"; // v1のままだと旧形式が混ざるのでv2推奨
-  const HISTORY_MAX = 25;                 // サムネ保存なので容量対策（必要なら増減OK）
+  const HISTORY_KEY = "roganOcrHistory_v4";
+  const UI_KEY = "roganOcrUiState_v1";
+  const HISTORY_MAX = 25;
 
   const video = document.getElementById("video");
   const canvas = document.getElementById("canvas");
-
   const startBtn = document.getElementById("startBtn");
   const stopBtn = document.getElementById("stopBtn");
   const shotBtn = document.getElementById("shotBtn");
   const ttsToggle = document.getElementById("ttsToggle");
-
+  const sizeToggle = document.getElementById("sizeToggle");
   const statusText = document.getElementById("statusText");
   const rawOut = document.getElementById("rawOut");
-  const numbersOut = document.getElementById("numbersOut");
   const historyEl = document.getElementById("history");
   const clearHistBtn = document.getElementById("clearHist");
 
   const histDialog = document.getElementById("histDialog");
   const dlgTime = document.getElementById("dlgTime");
-  const dlgNums = document.getElementById("dlgNums");
   const dlgRaw = document.getElementById("dlgRaw");
   const dlgImg = document.getElementById("dlgImg");
   const dlgClose = document.getElementById("dlgClose");
 
   let stream = null;
   let audioCtx = null;
-  let ttsEnabled = true;
+  let ttsEnabled = false;
+  let largeText = false;
+  let ocrBusy = false;
   let historyData = [];
 
-  // --- ビープ音（短い「ピ」） ---
   function playBeep() {
     try {
-      if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      const ctx = audioCtx;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = "sine";
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
       osc.frequency.value = 1500;
       gain.gain.value = 0.25;
-
       osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      const now = ctx.currentTime;
+      gain.connect(audioCtx.destination);
+      const now = audioCtx.currentTime;
       osc.start(now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
       osc.stop(now + 0.18);
-    } catch (e) {
-      console.warn("Beep error:", e);
-    }
+    } catch {}
   }
 
-  // --- 数字列だけ抽出して、読み上げ用テキストを作る ---
-  function extractNumbersForSpeech(text) {
-    if (!text) return { display: "", speak: "" };
-
-    const matches = text.match(/\d+/g) || [];
-    if (matches.length === 0) {
-      return { display: "", speak: "" };
-    }
-
-    const display = matches.join(" / ");
-    const speak = matches
-      .map(seq => seq.split("").join(" "))
-      .join(" 、 ");
-
-    return { display, speak };
-  }
-
-  // --- 読み上げ ---
   function speakText(text) {
-    if (!ttsEnabled) return;
-    if (!("speechSynthesis" in window)) return;
-    if (!text) return;
-
+    if (!ttsEnabled || !("speechSynthesis" in window)) return;
     speechSynthesis.cancel();
-
     const u = new SpeechSynthesisUtterance(text);
     u.lang = "ja-JP";
-    u.rate = 1.05;
-    u.pitch = 1.0;
     speechSynthesis.speak(u);
   }
 
-  // --- サムネ作成（canvasの内容から縮小してDataURL化） ---
-  function makeThumbnailFromCanvas(srcCanvas, thumbW = 220) {
-    try {
-      const sw = srcCanvas.width;
-      const sh = srcCanvas.height;
-      if (!sw || !sh) return "";
-
-      const ratio = thumbW / sw;
-      const tw = Math.max(1, Math.round(sw * ratio));
-      const th = Math.max(1, Math.round(sh * ratio));
-
-      const tcv = document.createElement("canvas");
-      tcv.width = tw;
-      tcv.height = th;
-
-      const tctx = tcv.getContext("2d");
-      tctx.imageSmoothingEnabled = true;
-      tctx.imageSmoothingQuality = "high";
-      tctx.drawImage(srcCanvas, 0, 0, tw, th);
-
-      // JPEGの方が容量に優しい（localStorage節約）
-      return tcv.toDataURL("image/jpeg", 0.72);
-    } catch (e) {
-      console.warn("Thumbnail error:", e);
-      return "";
-    }
+  function makeThumbnail() {
+    const tcv = document.createElement("canvas");
+    tcv.width = canvas.width * 0.3;
+    tcv.height = canvas.height * 0.3;
+    tcv.getContext("2d").drawImage(canvas, 0, 0, tcv.width, tcv.height);
+    return tcv.toDataURL("image/jpeg", 0.7);
   }
 
-  // --- カメラ開始 ---
   async function startCamera() {
-    try {
-      if (stream) {
-        stream.getTracks().forEach(t => t.stop());
-      }
-
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-        audio: false
-      });
-
-      video.srcObject = stream;
-      await video.play();
-
-      statusText.textContent = "カメラ起動中（印字を枠内に入れて読み取りを押してください）";
-      stopBtn.disabled = false;
-
-    } catch (err) {
-      statusText.textContent = "カメラエラー：" + err.message;
-    }
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = await navigator.mediaDevices.getUserMedia({ video:{facingMode:"environment"} });
+    video.srcObject = stream;
+    await video.play();
+    statusText.textContent = "カメラ起動中";
+    stopBtn.disabled = false;
   }
 
-  // --- カメラ停止 ---
   function stopCamera() {
-    if (stream) {
-      stream.getTracks().forEach(t => t.stop());
-      stream = null;
-    }
-    statusText.textContent = "カメラ停止中";
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = null;
     stopBtn.disabled = true;
+    statusText.textContent = "カメラ停止中";
   }
 
-  // --- 読み取りボタン：押した瞬間にピ、その後OCR ---
   async function captureAndOcr() {
-    if (!stream || !video.videoWidth) {
-      statusText.textContent = "カメラを開始してください";
-      return;
-    }
-
-    // 1回目の「ピ」
+    if (!stream || ocrBusy) return;
+    ocrBusy = true;
+    shotBtn.disabled = true;
+    statusText.textContent = "OCR処理中…";
     playBeep();
 
-    // 元キャンバス（OCR用）は軽量サイズで
     const w = 480;
     const h = Math.round(video.videoHeight * (w / video.videoWidth));
     canvas.width = w;
     canvas.height = h;
-
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(video, 0, 0, w, h);
-
-    // 履歴用サムネ（容量節約）
-    const thumbDataUrl = makeThumbnailFromCanvas(canvas, 220);
-
-    statusText.textContent = "OCR処理中…";
+    canvas.getContext("2d").drawImage(video, 0, 0, w, h);
 
     try {
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png", 0.9));
+      const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
+      const fd = new FormData();
+      fd.append("apikey", API_KEY);
+      fd.append("language", "jpn");
+      fd.append("file", blob);
 
-      const formData = new FormData();
-      formData.append("apikey", API_KEY);
-      formData.append("language", "jpn");
-      formData.append("isOverlayRequired", "false");
-      formData.append("scale", "true");
-      formData.append("OCREngine", "2");
-      formData.append("file", blob, "capture.png");
-
-      const res = await fetch("https://api.ocr.space/parse/image", {
-        method: "POST",
-        body: formData
-      });
-
-      if (!res.ok) {
-        throw new Error("HTTP " + res.status);
-      }
-
+      const res = await fetch("https://api.ocr.space/parse/image", { method:"POST", body:fd });
       const data = await res.json();
+      const text = data?.ParsedResults?.[0]?.ParsedText || "-";
 
-      if (data.IsErroredOnProcessing) {
-        const msg = Array.isArray(data.ErrorMessage)
-          ? data.ErrorMessage.join(", ")
-          : (data.ErrorMessage || "OCR error");
-        throw new Error(msg);
-      }
+      rawOut.textContent = text;
+      speakText("読み取り。 " + text);
 
-      const text = (data.ParsedResults && data.ParsedResults[0] && data.ParsedResults[0].ParsedText) || "";
-      handleText(text, thumbDataUrl);
-
-      statusText.textContent = "OCR完了（再度読み取りできます）";
-
-      // 2回目の「ピ」
-      playBeep();
-
-    } catch (e) {
-      rawOut.textContent = "OCRエラー：" + e.message;
-      numbersOut.textContent = "なし";
-      statusText.textContent = "エラーが発生しました";
-      speakText("エラーが発生しました");
-    }
-  }
-
-  // --- OCR結果処理 ---
-  function handleText(text, thumbDataUrl) {
-    rawOut.textContent = text || "-";
-
-    const { display, speak } = extractNumbersForSpeech(text || "");
-    numbersOut.textContent = display || "なし";
-
-    if (speak) {
-      speakText("読み取り。" + speak);
-    } else {
-      speakText("数字を読み取れませんでした");
-    }
-
-    const normalized = (text || "").replace(/\s+/g, " ").trim();
-
-    const entry = {
-      id: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + "_" + Math.random().toString(16).slice(2),
-      time: new Date().toLocaleTimeString(),
-      numbers: display || "なし",
-      raw: normalized.slice(0, 120),   // 一覧用（短縮）
-      fullRaw: normalized || "-",      // 再確認用（全文）
-      thumb: thumbDataUrl || ""        // 履歴用サムネ
-    };
-
-    addHistory(entry, true);
-  }
-
-  // --- 履歴詳細（再確認） ---
-  function openHistoryDetail(e) {
-    dlgTime.textContent = e.time || "";
-    dlgNums.textContent = `数字: ${e.numbers || "なし"}`;
-    dlgRaw.textContent = e.fullRaw || e.raw || "-";
-    dlgImg.src = e.thumb || "";
-
-    if (histDialog && typeof histDialog.showModal === "function") {
-      histDialog.showModal();
-    } else {
-      histDialog.setAttribute("open", "");
-    }
-  }
-
-  // --- 履歴描画（タップで詳細） ---
-  function renderHistoryItem(e) {
-    const li = document.createElement("li");
-    li.title = "タップして詳細を確認";
-
-    const img = document.createElement("img");
-    img.className = "thumb";
-    img.alt = "";
-    if (e.thumb) img.src = e.thumb;
-
-    const right = document.createElement("div");
-
-    const tags = document.createElement("div");
-    tags.innerHTML = `
-      <span class="tag">${e.time || ""}</span>
-      <span class="tag">数字: ${e.numbers || "なし"}</span>
-    `;
-
-    const snippet = document.createElement("div");
-    snippet.style.color = "#666";
-    snippet.style.marginTop = "4px";
-    snippet.textContent = e.raw || "-";
-
-    right.appendChild(tags);
-    right.appendChild(snippet);
-
-    li.appendChild(img);
-    li.appendChild(right);
-
-    li.addEventListener("click", () => openHistoryDetail(e));
-
-    historyEl.prepend(li);
-  }
-
-  // --- 履歴管理（データ＋保存） ---
-  function addHistory(entry, save) {
-    // 先頭に追加（新しい順で管理）
-    historyData.unshift(entry);
-
-    // 件数制限（容量対策）
-    if (historyData.length > HISTORY_MAX) {
-      historyData = historyData.slice(0, HISTORY_MAX);
-    }
-
-    // 表示は全部描画し直し（ズレ防止）
-    renderHistoryAll();
-
-    if (save) {
-      try {
-        localStorage.setItem(HISTORY_KEY, JSON.stringify(historyData));
-      } catch (e) {
-        console.warn("履歴保存エラー:", e);
-        // 容量オーバー時は古いものをさらに削って再トライ（保険）
-        try {
-          historyData = historyData.slice(0, Math.max(5, Math.floor(HISTORY_MAX * 0.6)));
-          localStorage.setItem(HISTORY_KEY, JSON.stringify(historyData));
-          renderHistoryAll();
-        } catch {}
-      }
-    }
-  }
-
-  function renderHistoryAll() {
-    historyEl.innerHTML = "";
-    for (const entry of historyData) {
-      renderHistoryItem(entry);
-    }
-    if (historyData.length === 0) {
-      const li = document.createElement("li");
-      li.style.cursor = "default";
-      li.style.gridTemplateColumns = "1fr";
-      li.innerHTML = `<div style="opacity:.7;">履歴はまだありません。</div>`;
-      historyEl.appendChild(li);
-    }
-  }
-
-  function loadHistory() {
-    try {
-      const saved = localStorage.getItem(HISTORY_KEY);
-      if (!saved) {
-        historyData = [];
-        renderHistoryAll();
-        return;
-      }
-      const arr = JSON.parse(saved);
-      if (!Array.isArray(arr)) {
-        historyData = [];
-        renderHistoryAll();
-        return;
-      }
-
-      // 旧形式が混ざっても開けるよう補正
-      historyData = arr.map(e => {
-        if (!("fullRaw" in e)) e.fullRaw = e.raw || "-";
-        if (!("raw" in e)) e.raw = (e.fullRaw || "-").slice(0, 120);
-        if (!("thumb" in e)) e.thumb = "";
-        if (!("id" in e)) e.id = String(Date.now()) + "_" + Math.random().toString(16).slice(2);
-        return e;
+      historyData.unshift({
+        time: new Date().toLocaleTimeString(),
+        raw: text.slice(0,120),
+        fullRaw: text,
+        thumb: makeThumbnail()
       });
+      historyData = historyData.slice(0, HISTORY_MAX);
+      saveHistory();
+      renderHistory();
 
-      // 念のため件数制限
-      if (historyData.length > HISTORY_MAX) historyData = historyData.slice(0, HISTORY_MAX);
-
-      renderHistoryAll();
-    } catch (e) {
-      console.warn("履歴読み込みエラー:", e);
-      historyData = [];
-      renderHistoryAll();
+      statusText.textContent = "OCR完了";
+      playBeep();
+    } catch {
+      statusText.textContent = "エラー";
+    } finally {
+      ocrBusy = false;
+      shotBtn.disabled = false;
     }
   }
 
-  function clearHistoryAll() {
-    historyData = [];
-    renderHistoryAll();
-    try {
-      localStorage.removeItem(HISTORY_KEY);
-    } catch (e) {
-      console.warn("履歴削除エラー:", e);
-    }
+  function renderHistory() {
+    historyEl.innerHTML = "";
+    historyData.forEach(e => {
+      const li = document.createElement("li");
+      li.innerHTML = `
+        <img class="thumb" src="${e.thumb}">
+        <div>
+          <span class="tag">${e.time}</span>
+          <div>${e.raw}</div>
+        </div>`;
+      li.onclick = () => {
+        dlgTime.textContent = e.time;
+        dlgRaw.textContent = e.fullRaw;
+        dlgImg.src = e.thumb;
+        histDialog.showModal();
+      };
+      historyEl.prepend(li);
+    });
   }
 
-  // --- イベント設定 ---
-  startBtn.addEventListener("click", startCamera);
-  stopBtn.addEventListener("click", stopCamera);
-  shotBtn.addEventListener("click", captureAndOcr);
-  clearHistBtn.addEventListener("click", clearHistoryAll);
+  function saveHistory() {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(historyData));
+  }
 
-  ttsToggle.addEventListener("click", () => {
-    ttsEnabled = !ttsEnabled;
+  function loadState() {
+    const ui = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
+    ttsEnabled = !!ui.tts;
+    largeText = !!ui.large;
+    applyUi();
+    historyData = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    renderHistory();
+  }
+
+  function applyUi() {
     ttsToggle.textContent = ttsEnabled ? "読み上げ ON" : "読み上げ OFF";
-  });
+    rawOut.className = "output " + (largeText ? "text-large" : "text-normal");
+    sizeToggle.textContent = largeText ? "文字 標準" : "文字 大";
+    localStorage.setItem(UI_KEY, JSON.stringify({ tts: ttsEnabled, large: largeText }));
+  }
 
-  dlgClose.addEventListener("click", () => histDialog.close());
+  startBtn.onclick = startCamera;
+  stopBtn.onclick = stopCamera;
+  shotBtn.onclick = captureAndOcr;
+  clearHistBtn.onclick = () => { historyData=[]; saveHistory(); renderHistory(); };
+  dlgClose.onclick = () => histDialog.close();
 
-  // ページ読み込み時に履歴復元
-  loadHistory();
+  ttsToggle.onclick = () => { ttsEnabled = !ttsEnabled; applyUi(); };
+  sizeToggle.onclick = () => { largeText = !largeText; applyUi(); };
+
+  window.addEventListener("beforeunload", stopCamera);
+
+  loadState();
 </script>
 
 </body>
