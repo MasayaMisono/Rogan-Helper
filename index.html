@@ -13,7 +13,8 @@
       background: #f7f7f7;
       color: #222;
     }
-    h1 { font-size: 1.15rem; margin-bottom: 10px; }
+    h1 { font-size: 1.15rem; margin-bottom: 10px; color:#222; }
+
     .card {
       background: #fff;
       border-radius: 12px;
@@ -22,6 +23,7 @@
       border: 1px solid #e5e5e5;
       box-shadow: 0 1px 4px rgba(0,0,0,0.06);
     }
+
     #video {
       width: 100%;
       max-height: 260px;
@@ -29,6 +31,9 @@
       border-radius: 12px;
       object-fit: cover;
     }
+
+    .row { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+
     button {
       border: none;
       border-radius: 8px;
@@ -36,13 +41,13 @@
       font-size: 0.9rem;
       cursor: pointer;
       background: #007aff;
-      color: #fff;
+      color: white;
       font-weight: 600;
-      margin-right: 6px;
-      margin-bottom: 6px;
     }
     button.secondary { background: #e5e5ea; color: #333; }
     button:disabled { opacity: 0.45; cursor: default; }
+
+    .status { font-size: 0.82rem; color: #444; margin-top: 6px; }
 
     .output {
       min-height: 1.6em;
@@ -57,9 +62,6 @@
     }
     .text-normal { font-size: 0.98rem; }
     .text-large  { font-size: 1.18rem; }
-
-    .status { font-size: 0.82rem; color: #444; margin-top: 6px; }
-    .row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 
     ul.history {
       list-style: none;
@@ -106,7 +108,7 @@
 
 <h1>老眼OCRルーペ</h1>
 <p style="font-size:0.8rem; color:#777; margin:4px 0 10px;">
-  印字に狙いを合わせて「読み取り」を押した瞬間だけOCRします。読み上げは基本OFFです。
+  印字に狙いを合わせて「読み取り」を押した瞬間だけOCRします。読み上げは基本OFF。ビープはON/OFFできます。
 </p>
 
 <div class="card">
@@ -118,6 +120,8 @@
     <button id="startBtn">カメラ開始</button>
     <button id="stopBtn" class="secondary" disabled>停止</button>
     <button id="shotBtn" class="secondary">読み取り</button>
+
+    <button id="beepToggle" class="secondary">ビープ ON</button>
     <button id="ttsToggle" class="secondary">読み上げ OFF</button>
     <button id="sizeToggle" class="secondary">文字 大</button>
   </div>
@@ -156,15 +160,23 @@
   const API_KEY = "K88740512688957";
   const OCR_URL = "https://api.ocr.space/parse/image";
 
-  const HISTORY_KEY = "roganOcrHistory_v6";
-  const UI_KEY = "roganOcrUiState_v2";
+  const HISTORY_KEY = "roganOcrHistory_v7";
+  const UI_KEY = "roganOcrUiState_v3";
   const HISTORY_MAX = 25;
 
   // 小さい文字向け：解像度（JPEG圧縮でサイズを抑える）
   const CAPTURE_WIDTH = 900; // 800〜1000で調整可
 
-  // OCR.space 無料枠の典型制限に合わせる（1MB）
-  const MAX_UPLOAD_BYTES = 1024 * 1024; // 1,048,576 bytes
+  // OCR.space 1MB制限対策
+  const MAX_UPLOAD_BYTES = 1024 * 1024;
+
+  // 履歴用サムネ：確認できる画質へ（溜まったら全削除運用前提）
+  const THUMB_WIDTH = 420;      // ★ 220→420
+  const THUMB_QUALITY = 0.88;   // ★ 0.72→0.88
+
+  // ビープ音：開始/完了の音程
+  const BEEP_START_HZ = 520; // 低め
+  const BEEP_DONE_HZ  = 740; // 少し高め
 
   // ===== DOM =====
   const video = document.getElementById("video");
@@ -173,6 +185,8 @@
   const startBtn = document.getElementById("startBtn");
   const stopBtn = document.getElementById("stopBtn");
   const shotBtn = document.getElementById("shotBtn");
+
+  const beepToggle = document.getElementById("beepToggle");
   const ttsToggle = document.getElementById("ttsToggle");
   const sizeToggle = document.getElementById("sizeToggle");
 
@@ -192,29 +206,39 @@
   let stream = null;
   let audioCtx = null;
 
-  let ttsEnabled = false; // デフォルトOFF
+  let beepEnabled = true; // ★ デフォルトON（好みでfalseでもOK）
+  let ttsEnabled = false; // ★ デフォルトOFF
   let largeText = false;
 
   let ocrBusy = false;
   let historyData = [];
 
   // ===== ビープ =====
-  function playBeep() {
+  function playBeep(freq) {
+    if (!beepEnabled) return;
     try {
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const ctx = audioCtx;
+
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
+
       osc.type = "sine";
-      osc.frequency.value = 1500;
-      gain.gain.value = 0.22;
+      osc.frequency.value = freq;
+
+      // 少し控えめな音量
+      gain.gain.value = 0.12;
+
       osc.connect(gain);
       gain.connect(ctx.destination);
+
       const now = ctx.currentTime;
       osc.start(now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
-      osc.stop(now + 0.18);
-    } catch {}
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+      osc.stop(now + 0.15);
+    } catch (e) {
+      console.warn("Beep error:", e);
+    }
   }
 
   // ===== 読み上げ（全文のみ）=====
@@ -233,20 +257,18 @@
 
   // ===== 送信サイズを1MB以下にするJPEG化（保険付き）=====
   async function canvasToJpegUnderLimit(cnv) {
-    // まずは高め品質から。ダメなら段階的に落とす
     let q = 0.80;
     while (q >= 0.45) {
       const blob = await new Promise(r => cnv.toBlob(r, "image/jpeg", q));
       if (blob && blob.size <= MAX_UPLOAD_BYTES) return { blob, quality: q };
       q -= 0.08;
     }
-    // 最後の手段
     const blob = await new Promise(r => cnv.toBlob(r, "image/jpeg", 0.45));
     return { blob, quality: 0.45 };
   }
 
-  // ===== サムネ生成（localStorage節約）=====
-  function makeThumbnailFromCanvas(srcCanvas, thumbW = 220) {
+  // ===== サムネ生成（確認用にクリア寄り）=====
+  function makeThumbnailFromCanvas(srcCanvas, thumbW = THUMB_WIDTH) {
     try {
       const sw = srcCanvas.width;
       const sh = srcCanvas.height;
@@ -265,8 +287,9 @@
       tctx.imageSmoothingQuality = "high";
       tctx.drawImage(srcCanvas, 0, 0, tw, th);
 
-      return tcv.toDataURL("image/jpeg", 0.72);
-    } catch {
+      return tcv.toDataURL("image/jpeg", THUMB_QUALITY);
+    } catch (e) {
+      console.warn("Thumbnail error:", e);
       return "";
     }
   }
@@ -309,24 +332,28 @@
 
     ocrBusy = true;
     shotBtn.disabled = true;
-    statusText.textContent = "OCR処理中…";
-    playBeep();
 
-    // まずキャンバスへ描画（小文字対策で横幅を確保）
+    // ★開始ビープ（低め）
+    statusText.textContent = "OCR処理中…";
+    playBeep(BEEP_START_HZ);
+
+    // キャンバスへ描画（小文字対策で横幅確保）
     const w = CAPTURE_WIDTH;
     const h = Math.round(video.videoHeight * (w / video.videoWidth));
     canvas.width = w;
     canvas.height = h;
     canvas.getContext("2d").drawImage(video, 0, 0, w, h);
 
-    const thumbDataUrl = makeThumbnailFromCanvas(canvas, 220);
+    // 履歴用サムネ（確認できる画質へ）
+    const thumbDataUrl = makeThumbnailFromCanvas(canvas, THUMB_WIDTH);
 
     try {
-      // ★ 1MB制限回避：JPEGでサイズを自動調整
+      // 1MB制限回避：JPEGでサイズを自動調整
       const { blob, quality } = await canvasToJpegUnderLimit(canvas);
       if (!blob) throw new Error("画像生成に失敗しました");
 
-      statusText.textContent = `OCR送信中…（圧縮 ${Math.round(quality * 100)}% / ${Math.round(blob.size / 1024)}KB）`;
+      statusText.textContent =
+        `OCR送信中…（圧縮 ${Math.round(quality * 100)}% / ${Math.round(blob.size / 1024)}KB）`;
 
       const formData = new FormData();
       formData.append("apikey", API_KEY);
@@ -353,7 +380,7 @@
 
       rawOut.textContent = rawText;
 
-      // ONの時だけ全文読み上げ
+      // ONの時だけ全文読み上げ（数字抽出なし）
       if (ttsEnabled) speakText("読み取り。 " + rawText);
 
       addHistory({
@@ -365,17 +392,17 @@
       });
 
       statusText.textContent = "OCR完了（再度読み取りできます）";
-      playBeep();
+
+      // ★完了ビープ（少し高め）
+      playBeep(BEEP_DONE_HZ);
 
     } catch (e) {
       const msg = String(e.message || e);
-
       if (msg.includes("maximum permissible file size")) {
-        rawOut.textContent = "OCRエラー：画像サイズが大きすぎます（1MB制限）。もう少し近づけて撮るか、圧縮率を上げてください。";
+        rawOut.textContent = "OCRエラー：画像サイズが大きすぎます（1MB制限）。近づけて撮るか、圧縮がかかるまで待ってください。";
       } else {
         rawOut.textContent = "OCRエラー：" + msg;
       }
-
       statusText.textContent = "エラーが発生しました";
     } finally {
       ocrBusy = false;
@@ -393,6 +420,7 @@
 
   function renderHistoryAll() {
     historyEl.innerHTML = "";
+
     if (historyData.length === 0) {
       const li = document.createElement("li");
       li.style.cursor = "default";
@@ -448,6 +476,7 @@
     try {
       localStorage.setItem(HISTORY_KEY, JSON.stringify(historyData));
     } catch {
+      // 容量が厳しい端末向け：古いものを削って再トライ
       try {
         historyData = historyData.slice(0, Math.max(5, Math.floor(HISTORY_MAX * 0.6)));
         localStorage.setItem(HISTORY_KEY, JSON.stringify(historyData));
@@ -485,6 +514,7 @@
 
   // ===== UI状態 =====
   function applyUi() {
+    beepToggle.textContent = beepEnabled ? "ビープ ON" : "ビープ OFF";
     ttsToggle.textContent = ttsEnabled ? "読み上げ ON" : "読み上げ OFF";
     sizeToggle.textContent = largeText ? "文字 標準" : "文字 大";
 
@@ -492,15 +522,20 @@
     dlgRaw.className = "output " + (largeText ? "text-large" : "text-normal");
 
     try {
-      localStorage.setItem(UI_KEY, JSON.stringify({ tts: ttsEnabled, large: largeText }));
+      localStorage.setItem(UI_KEY, JSON.stringify({
+        beep: beepEnabled,
+        tts: ttsEnabled,
+        large: largeText
+      }));
     } catch {}
   }
 
   function loadUiState() {
     try {
       const ui = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
-      ttsEnabled = !!ui.tts;   // デフォルトOFF維持（保存があればそれを尊重）
-      largeText = !!ui.large;
+      if ("beep" in ui) beepEnabled = !!ui.beep;
+      if ("tts" in ui)  ttsEnabled = !!ui.tts;   // デフォルトOFF維持
+      if ("large" in ui) largeText = !!ui.large;
     } catch {}
   }
 
@@ -508,7 +543,13 @@
   startBtn.addEventListener("click", startCamera);
   stopBtn.addEventListener("click", stopCamera);
   shotBtn.addEventListener("click", captureAndOcr);
+
   clearHistBtn.addEventListener("click", clearHistoryAll);
+
+  beepToggle.addEventListener("click", () => {
+    beepEnabled = !beepEnabled;
+    applyUi();
+  });
 
   ttsToggle.addEventListener("click", () => {
     ttsEnabled = !ttsEnabled;
