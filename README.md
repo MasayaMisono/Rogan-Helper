@@ -8,6 +8,10 @@ This is a small personal Web app created to help read small printed text
 The app is intentionally simple and lightweight.
 It is designed for personal use, not as a commercial service.
 
+これは、年齢とともに読みにくくなる小さな印刷文字（例：ラベル、マニュアル、製品情報）の読み取りを支援するために作成された、個人向けの小さなWebアプリです。
+
+このアプリは意図的にシンプルで軽量に設計されています。商用サービスではなく、個人での使用を目的として設計されています。
+
 ---
 
 ## About the OCR API key
